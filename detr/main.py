@@ -75,7 +75,9 @@ def build_ACT_model_and_optimizer(args_override):
         setattr(args, k, v)
 
     model = build_ACT_model(args)
-    model.cuda()
+    # model.cuda()
+    device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+    model.to(device)
 
     param_dicts = [
         {"params": [p for n, p in model.named_parameters() if "backbone" not in n and p.requires_grad]},
