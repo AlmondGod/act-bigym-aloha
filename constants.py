@@ -1,9 +1,9 @@
 import pathlib
 
 ### Task parameters
-ROOT = '/Users/almondgod/Repositories'
+ROOT = '/Users/almondgod/Repositories/aloha-bigym/control'
 COLAB_ROOT = '/content'
-DATA_DIR = COLAB_ROOT + '/aloha-bigym/control/data'
+DATA_DIR = COLAB_ROOT + '/data'
 SIM_TASK_CONFIGS = {
     'sim_transfer_cube_scripted':{
         'dataset_dir': DATA_DIR + '/sim_transfer_cube_scripted',
