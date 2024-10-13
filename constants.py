@@ -2,7 +2,7 @@ import pathlib
 
 ### Task parameters
 ROOT = '/Users/almondgod/Repositories/aloha-bigym/control'
-COLAB_ROOT = '/content'
+COLAB_ROOT = '/content/data/'
 DATA_DIR = COLAB_ROOT + '/data'
 SIM_TASK_CONFIGS = {
     'sim_transfer_cube_scripted':{
@@ -34,7 +34,7 @@ SIM_TASK_CONFIGS = {
     },
     'sim_aloha_close_dishwasher': {
         'dataset_dir': DATA_DIR,
-        'num_episodes': 9,
+        'num_episodes': 20,
         'episode_len': 400,
         'camera_names': ['wrist_cam_left', 'wrist_cam_right', 'overhead_cam', 'teleoperator_pov']
     }
