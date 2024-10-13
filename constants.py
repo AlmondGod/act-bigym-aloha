@@ -1,7 +1,7 @@
 import pathlib
 
 ### Task parameters
-DATA_DIR = '<put your data dir here>'
+DATA_DIR = '/Users/almondgod/Repositories/aloha-bigym/control/data'
 SIM_TASK_CONFIGS = {
     'sim_transfer_cube_scripted':{
         'dataset_dir': DATA_DIR + '/sim_transfer_cube_scripted',
@@ -30,6 +30,12 @@ SIM_TASK_CONFIGS = {
         'episode_len': 500,
         'camera_names': ['top']
     },
+    'sim_aloha_close_dishwasher': {
+        'dataset_dir': DATA_DIR,
+        'num_episodes': 9,
+        'episode_len': 400,
+        'camera_names': ['wrist_cam_left', 'wrist_cam_right', 'overhead_cam', 'teleoperator_pov']
+    }
 }
 
 ### Simulation envs fixed constants
