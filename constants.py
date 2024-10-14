@@ -34,8 +34,8 @@ SIM_TASK_CONFIGS = {
     },
     'sim_aloha_close_dishwasher': {
         'dataset_dir': DATA_DIR,
-        'num_episodes': 20,
-        'episode_len': 400,
+        'num_episodes': 16,
+        'episode_len': 100,
         'camera_names': ['wrist_cam_left', 'wrist_cam_right', 'overhead_cam', 'teleoperator_pov']
     }
 }
