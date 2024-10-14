@@ -130,17 +130,11 @@ class Simulator():
         self.left_relevant_qvel_indices = np.array([model.jnt_dofadr[model.joint(name).id] for name in self.left_joint_names])
         self.left_configuration = ReducedConfiguration(model, data, self.left_relevant_qpos_indices, self.left_relevant_qvel_indices)
 
-        self.lstore = self.left_relevant_qpos_indices
-        self.lvelstore = self.left_relevant_qvel_indices
-
         self.right_dof_ids = np.array([model.joint(name).id for name in self.right_joint_names])
         self.right_actuator_ids = np.array([model.actuator(name).id for name in self.right_joint_names])
         self.right_relevant_qpos_indices = np.array([model.jnt_qposadr[model.joint(name).id] for name in self.right_joint_names])
         self.right_relevant_qvel_indices = np.array([model.jnt_dofadr[model.joint(name).id] for name in self.right_joint_names])
         self.right_configuration = ReducedConfiguration(model, data, self.right_relevant_qpos_indices, self.right_relevant_qvel_indices)
-
-        self.rstore = self.right_relevant_qpos_indices
-        self.rvelstore = self.right_relevant_qvel_indices
 
     def so3_to_matrix(self, so3_rotation: SO3) -> np.ndarray:
         return so3_rotation.as_matrix()
@@ -194,9 +188,10 @@ class Simulator():
 
     def get_qpos(self):
         model = self.model
-        self.lstore = np.array([model.jnt_qposadr[model.joint(name).id] for name in self.left_joint_names])
-        self.rstore = np.array([model.jnt_qposadr[model.joint(name).id] for name in self.right_joint_names])
-        qpos = np.concatenate((self.lstore, [self.left_gripper_pos], self.rstore, [self.right_gripper_pos]), axis=0)
+        self.l_qpos = self.data.qpos[self.left_relevant_qpos_indices]
+        self.r_qpos = self.data.qpos[self.right_relevant_qpos_indices]
+
+        qpos = np.concatenate((self.l_qpos, [self.left_gripper_pos], self.r_qpos, [self.right_gripper_pos]), axis=0)
         return qpos
         
     def get_qvel(self):
@@ -204,9 +199,10 @@ class Simulator():
         right_gripper_vel = 1 if self.action[13] > 0 else -1 if self.action[13] < 0 else 0
 
         model = self.model
-        self.rvelstore = np.array([model.jnt_dofadr[model.joint(name).id] for name in self.right_joint_names])
-        self.lvelstore = np.array([model.jnt_dofadr[model.joint(name).id] for name in self.left_joint_names])
-        qvel = np.concatenate((self.lvelstore, [left_gripper_vel], self.rvelstore, [right_gripper_vel]), axis=0)
+        self.l_qvel = self.data.qvel[self.left_relevant_qvel_indices]
+        self.r_qvel = self.data.qvel[self.right_relevant_qvel_indices]
+
+        qvel = np.concatenate((self.l_qvel, [left_gripper_vel], self.r_qvel, [right_gripper_vel]), axis=0)
         return qvel
         
     def get_obs(self, cam_name):
@@ -232,6 +228,8 @@ class Simulator():
         
         curr_image = self.get_image(self, self.camera_names)
         qpos = qpos_numpy = np.array(self.get_qpos())
+
+        print(f"qpos: {qpos}")
             
         qpos = pre_process(qpos_numpy)
         qpos = torch.from_numpy(qpos).float().unsqueeze(0)
@@ -245,7 +243,7 @@ class Simulator():
         self.action = action
 
         # translation
-        self.target_r[0] += self.action[7]
+        self.target_r[0] = self.action[7]
         self.target_r[1] += self.action[8]
         self.target_r[2] += self.action[9]
         self.target_r = np.clip(self.target_r, [self.x_min, self.y_min, self.z_min], [self.x_max, self.y_max, self.z_max])
@@ -254,6 +252,8 @@ class Simulator():
         self.target_l[1] += self.action[1]
         self.target_l[2] += self.action[2]
         self.target_l = np.clip(self.target_l, [self.x_min, self.y_min, self.z_min], [self.x_max, self.y_max, self.z_max])
+
+        print(f"target l 2 action: {self.action[2]}, target l 2: {self.target_l[2]}")
 
         #rotation
         self.update_rotation('x', self.action[3], 'left')
@@ -383,6 +383,7 @@ def eval_bc(config, ckpt_name, save_episode=True):
     with open(stats_path, 'rb') as f:
         stats = pickle.load(f)
 
+    # print(f"mean: {stats['qpos_mean']}, std: {stats['qpos_std']}")
     post_process = lambda a: a * stats['action_std'] + stats['action_mean']
 
     query_frequency = policy_config['num_queries']
@@ -443,6 +444,7 @@ def eval_bc(config, ckpt_name, save_episode=True):
 
             all_actions = sim.select_action(policy, stats)
             while viewer.is_running():
+
                 sim.num_timesteps += 1
                 if sim.num_timesteps % query_frequency == 0:
                     all_actions = sim.select_action(policy, stats)
@@ -454,7 +456,7 @@ def eval_bc(config, ckpt_name, save_episode=True):
 
                 print(f"all actions: {all_actions}")
 
-                # action = post_process(raw_action)
+                action = post_process(raw_action)
                 action = raw_action
 
                 sim.forward_actions(action)
@@ -510,7 +512,7 @@ def eval_bc(config, ckpt_name, save_episode=True):
                     viewer.sync()
                     sim_rate.sleep()
 
-                if sim.num_timesteps == 100:
+                if sim.num_timesteps == 40 * 100: # rate of data collection per loop iteration (see teleop_aloha.py data_recording_interval) * length of one data episode
                     sim_rate.sleep()
                     break
 
