@@ -336,7 +336,9 @@ def main(args):
     }
 
     if is_eval:
-        ckpt_names = [f'policy_epoch_1967_seed_0.ckpt']
+        ckpt_names = [f'policy_last.ckpt']
+        # ckpt_names = [f'policy_best.ckpt']
+        # ckpt_names = [f'policy_epoch_3900_seed_4.ckpt']
         for ckpt_name in ckpt_names:
             eval_bc(config, ckpt_name, save_episode=True)
         exit()
@@ -420,9 +422,8 @@ def eval_bc(config, ckpt_name, save_episode=True):
     solver = "osqp"
     max_iters = 20
 
-    data_recording_interval = 40
-
     num_loop_iters = 0
+    select_new = False
 
     #TODO: replace this loop with teleop_aloha env running loop (pass in actions)
     with torch.inference_mode():
@@ -446,23 +447,27 @@ def eval_bc(config, ckpt_name, save_episode=True):
             while viewer.is_running():
 
                 num_loop_iters += 1
-                if sim.num_timesteps % query_frequency == 0 and sim.num_timesteps != 0:
+                if sim.num_timesteps % 15 == 0 and sim.num_timesteps != 0 and select_new:
                     print(f"sim num timesteps: {sim.num_timesteps}, query frequency: {query_frequency}, num loop iters: {num_loop_iters}")
                     all_actions = sim.select_action(policy, stats)
+                    select_new = False
 
-                if (num_loop_iters % 40 == 0):
+                if (num_loop_iters % 1 == 0):
                     sim.num_timesteps += 1
+                    select_new = True
                 
                 raw_action = all_actions[:, sim.num_timesteps % query_frequency] #all actions shape is (1, num_timesteps, action_dim)
                 raw_action = raw_action.squeeze(0).cpu().numpy()
 
-                print(f"raw action: {raw_action}")
-                print(f"all actions: {all_actions}")
+                action = post_process(raw_action)
 
-                # action = post_process(raw_action)
-                action = raw_action
+                # The below are postprocessing adjusts I tried (sometimes improve policy)
+                # divide aciton by norm then scale by 10z
+                # action *= np.linalg.norm(action)
+                # action *= 60
 
-                print(f"post processed all actions: {post_process(all_actions)}")
+                # action[2] /= 2.5
+                # action[9] /= 2.5
                 
                 sim.forward_actions(action)
 
@@ -515,7 +520,7 @@ def eval_bc(config, ckpt_name, save_episode=True):
                     viewer.sync()
                     sim_rate.sleep()
 
-                if sim.num_timesteps == 100: # rate of data collection per loop iteration (see teleop_aloha.py data_recording_interval) * length of one data episode
+                if sim.num_timesteps == 200: # rate of data collection per loop iteration (see teleop_aloha.py data_recording_interval) * length of one data episode
                     sim_rate.sleep()
                     print(f"num loop iters: {num_loop_iters}")
                     print(f"num timesteps: {sim.num_timesteps}")
