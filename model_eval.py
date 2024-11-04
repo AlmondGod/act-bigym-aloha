@@ -38,6 +38,8 @@ from reduced_configuration import ReducedConfiguration
 from loop_rate_limiters import RateLimiter
 from pyjoycon import JoyCon, get_R_id, get_L_id
 import os
+from collections import deque
+
 
 _JOINT_NAMES = [
     "waist",
@@ -136,6 +138,8 @@ class Simulator():
         self.right_relevant_qvel_indices = np.array([model.jnt_dofadr[model.joint(name).id] for name in self.right_joint_names])
         self.right_configuration = ReducedConfiguration(model, data, self.right_relevant_qpos_indices, self.right_relevant_qvel_indices)
 
+        self.action_buffers = [deque(maxlen=100) for _ in range(100)]
+
     def so3_to_matrix(self, so3_rotation: SO3) -> np.ndarray:
         return so3_rotation.as_matrix()
 
@@ -225,10 +229,11 @@ class Simulator():
         pre_process = lambda s_qpos: (s_qpos - stats['qpos_mean']) / stats['qpos_std']
         
         curr_image = self.get_image(self, self.camera_names)
-        qpos = qpos_numpy = np.array(self.get_qpos())
+        qpos_numpy = np.array(self.get_qpos())
 
         # print(f"qpos: {qpos}")
-            
+
+        qpos = qpos_numpy
         # qpos = pre_process(qpos_numpy)
         qpos = torch.from_numpy(qpos).float().unsqueeze(0)
 
@@ -360,16 +365,8 @@ def make_optimizer(policy_class, policy):
 def eval_bc(config, ckpt_name, save_episode=True):
     set_seed(1000)
     ckpt_dir = config['ckpt_dir']
-    state_dim = config['state_dim']
-    real_robot = config['real_robot']
     policy_class = config['policy_class']
-    onscreen_render = config['onscreen_render']
     policy_config = config['policy_config']
-    camera_names = config['camera_names']
-    max_timesteps = config['episode_len']
-    task_name = config['task_name']
-    temporal_agg = config['temporal_agg']
-    onscreen_cam = 'angle'
 
     # load policy and stats
     ckpt_path = os.path.join(ckpt_dir, ckpt_name)
@@ -423,9 +420,8 @@ def eval_bc(config, ckpt_name, save_episode=True):
     max_iters = 20
 
     num_loop_iters = 0
-    select_new = False
+    current_timestep = 0
 
-    #TODO: replace this loop with teleop_aloha env running loop (pass in actions)
     with torch.inference_mode():
         with mujoco.viewer.launch_passive(
             model=model, data=data, show_left_ui=True, show_right_ui=False
@@ -443,35 +439,49 @@ def eval_bc(config, ckpt_name, save_episode=True):
 
             sim_rate = RateLimiter(frequency=200.0) 
 
-            all_actions = sim.select_action(policy, stats)
+            next_actions = sim.select_action(policy, stats)
+            raw_action = next_actions.squeeze(0).cpu().numpy()
+            actions = post_process(raw_action)
+            for i, action in enumerate(actions):
+                sim.action_buffers[current_timestep + i].append(action)
+
+            m = 0.1 # from paper: this governs the speed of incorporating new observations, and smaller m means faster incorporation 
+            w_i = lambda i: np.exp(m * i)
+
+            current_action_buffer = sim.action_buffers[current_timestep]
+            action = np.sum([w_i(i) * a for i, a in enumerate(current_action_buffer)], axis=0) / np.sum([w_i(i) for i in range(len(current_action_buffer))])
+            sim.forward_actions(action)
+            sim.control_gripper(sim.left_gripper_pos, sim.right_gripper_pos)
+
+            current_timestep += 1
+            
             while viewer.is_running():
-
-                num_loop_iters += 1
-                if sim.num_timesteps % 15 == 0 and sim.num_timesteps != 0 and select_new:
-                    print(f"sim num timesteps: {sim.num_timesteps}, query frequency: {query_frequency}, num loop iters: {num_loop_iters}")
-                    all_actions = sim.select_action(policy, stats)
-                    select_new = False
-
-                if (num_loop_iters % 1 == 0):
-                    sim.num_timesteps += 1
-                    select_new = True
                 
-                raw_action = all_actions[:, sim.num_timesteps % query_frequency] #all actions shape is (1, num_timesteps, action_dim)
-                raw_action = raw_action.squeeze(0).cpu().numpy()
+                num_loop_iters += 1
 
-                action = post_process(raw_action)
+                if (num_loop_iters % 40 == 0):
+                    next_actions = sim.select_action(policy, stats)
+                    raw_action = next_actions.squeeze(0).cpu().numpy()
+                    actions = post_process(raw_action)
 
-                # The below are postprocessing adjusts I tried (sometimes improve policy)
-                # divide aciton by norm then scale by 10z
-                # action *= np.linalg.norm(action)
-                # action *= 60
+                    for i, action in enumerate(actions):
+                        sim.action_buffers[current_timestep + i].append(action)
 
-                # action[2] /= 2.5
-                # action[9] /= 2.5
+                    current_action_buffer = sim.action_buffers[current_timestep]
+
+                    action = np.sum([w_i(i) * a for i, a in enumerate(current_action_buffer)], axis=0) / np.sum([w_i(i) for i in range(len(current_action_buffer))])
+                    
+                    # action *= 40
+
+                    print(f"current action: {action}")
+
+                    sim.forward_actions(action)
+
+                    sim.control_gripper(sim.left_gripper_pos, sim.right_gripper_pos)
+
+                    current_timestep += 1
                 
                 sim.forward_actions(action)
-
-                sim.control_gripper(sim.left_gripper_pos, sim.right_gripper_pos)
 
                 if sim.targets_updated:
                     l_target_pose = mink.SE3.from_rotation_and_translation(sim.rot_l, sim.target_l)
